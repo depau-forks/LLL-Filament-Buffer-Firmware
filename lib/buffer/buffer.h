@@ -68,22 +68,21 @@
 typedef struct Buffer
 {
     // buffer1
-    bool buffer1_pos1_sensor_state;    
-    bool buffer1_pos2_sensor_state;        
-    bool buffer1_pos3_sensor_state;        
-    bool buffer1_material_swtich_state;    
+    bool buffer1_pos1_sensor_state;
+    bool buffer1_pos2_sensor_state;
+    bool buffer1_pos3_sensor_state;
+    bool buffer1_material_swtich_state;
     bool key1;
     bool key2;
-    
-}Buffer;
+} Buffer;
 
 // Motor state control enum
 typedef enum
 {
-    Forward=0,// Forward
-    Stop,        // Stop
-    Back        // Back
-}Motor_State;
+    Forward = 0, // Forward
+    Stop, // Stop
+    Back // Back
+} Motor_State;
 
 extern void buffer_sensor_init();
 extern void buffer_motor_init();
@@ -97,7 +96,7 @@ extern void timer_it_callback();
 extern void buffer_debug(void);
 
 extern bool is_error;
-extern uint32_t front_time;// Forward time
+extern uint32_t front_time; // Forward time
 extern uint32_t timeout;
 extern bool is_front;
 extern TMC2209Stepper driver;
