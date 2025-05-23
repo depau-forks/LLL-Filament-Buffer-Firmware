@@ -4,41 +4,41 @@
   * @author  lijihu
   * @version V1.0.0
   * @date    2025/05/10
-  * @brief   实现缓冲器功能
-			  *缓冲器说明
-				光感：遮挡1，不遮挡0；
-				耗材开关：有耗材0，无耗材1；
-				按键：按下0，松开1；
+  * @brief   Implements buffer functionality
+              *Buffer description
+                Photosensor: Blocked 1, Unblocked 0;
+                Material switch: Material present 0, No material 1;
+                Button: Pressed 0, Released 1;
 
-				引脚：
-				HALL1 --> PB2 (光感3)
-				HALL2 --> PB3 (光感2)
-				HALL3 --> PB4 (光感1)
-				ENDSTOP_3 --> PB7(耗材开关)
-				KEY1 --> PB13(后退)	
-				KEY2 --> PB12(前进)
+                Pins:
+                HALL1 --> PB2 (Photosensor 3)
+                HALL2 --> PB3 (Photosensor 2)
+                HALL3 --> PB4 (Photosensor 1)
+                ENDSTOP_3 --> PB7(Material switch)
+                KEY1 --> PB13(Back)
+                KEY2 --> PB12(Forward)
   *
   * @note    
   ***************************************************************************************
-  * 版权声明 COPYRIGHT 2025 xxx@126.com
+  * Copyright COPYRIGHT 2025 xxx@126.com
   ***************************************************************************************
 **/
 
 
 #include "buffer.h"
 TMC2209Stepper driver(UART, UART, R_SENSE, DRIVER_ADDRESS);
-Buffer buffer={0};//存储个传感器状态
+Buffer buffer={0}; // Store the state of each sensor
 Motor_State motor_state=Stop;
 
-bool is_front=false;//前进标志位
-uint32_t front_time=0;//前进时间
+bool is_front=false; // Forward flag
+uint32_t front_time=0; // Forward time
 const int EEPROM_ADDR_TIMEOUT = 0;
 const uint32_t DEFAULT_TIMEOUT = 30000;
-uint32_t timeout=30000;//超时时间，单位：ms;
-bool is_error=false;//错误标志位，如果连续30s推送耗材没停过，则认为错误
+uint32_t timeout=30000; // Timeout, unit: ms
+bool is_error=false; // Error flag, if continuously pushing material for 30s without stopping, consider it an error
 String serial_buf;
 
-static HardwareTimer timer(TIM6);//超时出错
+static HardwareTimer timer(TIM6); // Timeout error
 
 void buffer_init(){
   buffer_sensor_init();
@@ -46,7 +46,7 @@ void buffer_init(){
   delay(1000);
 
   EEPROM.get(EEPROM_ADDR_TIMEOUT, timeout);
-  // 判断读取的值是否有效（例如首次写入前是 0xFFFFFFFF 或 0）
+  // Determine if the read value is valid (e.g., before first write it's 0xFFFFFFFF or 0)
   if (timeout == 0xFFFFFFFF || timeout == 0) {
     timeout = DEFAULT_TIMEOUT;
     EEPROM.put(EEPROM_ADDR_TIMEOUT, timeout);
@@ -57,64 +57,64 @@ void buffer_init(){
   }
 
   timer.pause();
-  timer.setPrescaleFactor(48);//48分频  48000000/48=1000000
-  timer.setOverflow(1000);//1ms
+  timer.setPrescaleFactor(48); // 48 prescaler  48000000/48=1000000
+  timer.setOverflow(1000); // 1ms
   timer.attachInterrupt(&timer_it_callback);
   timer.resume();
 }
 
 void buffer_loop(){
 
-  uint32_t lastToggleTime = millis();  // 记录上次切换的时间
+  uint32_t lastToggleTime = millis();  // Record the last toggle time
   while(1)
-	{
-		
-		
-		if(millis() - lastToggleTime >= 500)  // 每隔 500ms
-		{
-			lastToggleTime = millis();  // 记录当前时间
+    {
+        
+        
+        if(millis() - lastToggleTime >= 500)  // Every 500ms
+        {
+            lastToggleTime = millis();  // Record current time
       digitalToggle(ERR_LED);
-		}
-		//1、读取各传感器的值
-		read_sensor_state();
+        }
+        // 1. Read the value of each sensor
+        read_sensor_state();
 
     #if DEBUG
-		buffer_debug();
-		while(Serial.available()>0){
-		char c=Serial.read();
-		serial_buf+=c;
-		int pos_enter = -1;
-		pos_enter = serial_buf.indexOf("\n");
-		if(pos_enter != -1){
-			String str=serial_buf.substring(0,pos_enter);
-			serial_buf=serial_buf.substring(pos_enter+1);
-			if(strstr(str.c_str(),"gconf")!=NULL){
-				TMC2208_n::CHOPCONF_t gconf{0};
+        buffer_debug();
+        while(Serial.available()>0){
+        char c=Serial.read();
+        serial_buf+=c;
+        int pos_enter = -1;
+        pos_enter = serial_buf.indexOf("\n");
+        if(pos_enter != -1){
+            String str=serial_buf.substring(0,pos_enter);
+            serial_buf=serial_buf.substring(pos_enter+1);
+            if(strstr(str.c_str(),"gconf")!=NULL){
+                TMC2208_n::CHOPCONF_t gconf{0};
 
-				// 提取 "gconf" 后面的十六进制字符串
-				int pos = str.indexOf("gconf");
-				if (pos != -1) {
-					String hexPart = str.substring(pos + 5); // 跳过 "gconf"
-					hexPart.trim(); // 去除前后空白符
+                // Extract the hexadecimal string after "gconf"
+                int pos = str.indexOf("gconf");
+                if (pos != -1) {
+                    String hexPart = str.substring(pos + 5); // Skip "gconf"
+                    hexPart.trim(); // Remove leading and trailing whitespace
 
-					// 将字符串转换为 32 位无符号整数
-					uint32_t hexValue = strtoul(hexPart.c_str(), NULL, 16);
+                    // Convert string to 32-bit unsigned integer
+                    uint32_t hexValue = strtoul(hexPart.c_str(), NULL, 16);
 
-					// 赋值给结构体（按你的结构定义赋值）
-					gconf.sr = hexValue; // 假设 sr 是结构体中的原始寄存器值字段
-				}
-				driver.GCONF(gconf.sr);
-				Serial.print("write GCONF:0x");
-				Serial.println(gconf.sr,HEX);
-				Serial.print("read GCONF: 0x");	
-				Serial.println(driver.GCONF(),HEX);
-				
-			}
+                    // Assign to struct (assign according to your struct definition)
+                    gconf.sr = hexValue; // Assume sr is the raw register value field in the struct
+                }
+                driver.GCONF(gconf.sr);
+                Serial.print("write GCONF:0x");
+                Serial.println(gconf.sr,HEX);
+                Serial.print("read GCONF: 0x");    
+                Serial.println(driver.GCONF(),HEX);
+                
+            }
 
-		}
+        }
     }
     #else 
-	motor_control();
+    motor_control();
 
     while(Serial.available()>0){
       char c=Serial.read();
@@ -150,14 +150,14 @@ void buffer_loop(){
 
     
     #endif
-	}
+    }
 
 }
 
 
 
 void buffer_sensor_init(){
-  //传感器初始化
+  // Sensor initialization
   pinMode(HALL1,INPUT);
   pinMode(HALL2,INPUT);
   pinMode(HALL3,INPUT);
@@ -165,20 +165,20 @@ void buffer_sensor_init(){
   pinMode(KEY1,INPUT);
   pinMode(KEY2,INPUT);
 
-  //耗材指示灯初始化
+  // Material indicator light initialization
   pinMode(DUANLIAO,OUTPUT);
   pinMode(ERR_LED,OUTPUT);
   pinMode(START_LED,OUTPUT);
 }
 
 void buffer_motor_init(){
-  //电机驱动引脚初始化
+  // Motor driver pin initialization
   pinMode(EN_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
   digitalWrite(EN_PIN, LOW);      // Enable driver in hardware
 
-  //电机驱动初始化
+  // Motor driver initialization
   driver.begin();                  // UART: Init SW UART (if selected) with default 115200 baudrate
   driver.beginSerial(9600);
   driver.I_scale_analog(false);
@@ -192,205 +192,205 @@ void buffer_motor_init(){
 }
 
 /**
-  * @brief  读取各传感器状态
+  * @brief  Read the state of each sensor
   * @param  NULL
   * @retval NULL
 **/
 void read_sensor_state(void)
 {
-	buffer.buffer1_pos1_sensor_state= digitalRead(HALL3);
-	buffer.buffer1_pos2_sensor_state= digitalRead(HALL2);	
-	buffer.buffer1_pos3_sensor_state= digitalRead(HALL1);		
-	buffer.buffer1_material_swtich_state=digitalRead(ENDSTOP_3);	
-	buffer.key1=digitalRead(KEY1);
-	buffer.key2=digitalRead(KEY2);
+    buffer.buffer1_pos1_sensor_state= digitalRead(HALL3);
+    buffer.buffer1_pos2_sensor_state= digitalRead(HALL2);    
+    buffer.buffer1_pos3_sensor_state= digitalRead(HALL1);        
+    buffer.buffer1_material_swtich_state=digitalRead(ENDSTOP_3);    
+    buffer.key1=digitalRead(KEY1);
+    buffer.key2=digitalRead(KEY2);
 }
 
 /**
-  * @brief  电机控制
+  * @brief  Motor control
   * @param  NULL
   * @retval NULL
 **/
 void motor_control(void)
 {
-	
-	static Motor_State last_motor_state=Stop;
-	
-	//按键控制电机
-	//按键1按下
-	if(!digitalRead(KEY1))
-	{
-		WRITE_EN_PIN(0);//使能
-    driver.VACTUAL(STOP);	//停止
-		
+    
+    static Motor_State last_motor_state=Stop;
+    
+    // Button controls motor
+    // Button 1 pressed
+    if(!digitalRead(KEY1))
+    {
+        WRITE_EN_PIN(0); // Enable
+    driver.VACTUAL(STOP);    // Stop
+        
     driver.shaft(BACK);
     driver.VACTUAL(VACTRUAL_VALUE);
-		while(!digitalRead(KEY1));//等待松手
-					
+        while(!digitalRead(KEY1)); // Wait for release
+                    
 
-		driver.VACTUAL(STOP);	//停止
-		motor_state=Stop;
+        driver.VACTUAL(STOP);    // Stop
+        motor_state=Stop;
 
-		is_front=false;
-		front_time=0;
-		is_error=false;
-		WRITE_EN_PIN(1);//失能
+        is_front=false;
+        front_time=0;
+        is_error=false;
+        WRITE_EN_PIN(1); // Disable
 
-	}
-	else if(!digitalRead(KEY2))//按键2按下
-	{
-		WRITE_EN_PIN(0);
-		driver.VACTUAL(STOP);	//停止
-		
+    }
+    else if(!digitalRead(KEY2)) // Button 2 pressed
+    {
+        WRITE_EN_PIN(0);
+        driver.VACTUAL(STOP);    // Stop
+        
     driver.shaft(FORWARD);
-		driver.VACTUAL(VACTRUAL_VALUE);
-		while(!digitalRead(KEY2));
-					
+        driver.VACTUAL(VACTRUAL_VALUE);
+        while(!digitalRead(KEY2));
+                    
 
-		driver.VACTUAL(STOP);	//停止
-		motor_state=Stop;
+        driver.VACTUAL(STOP);    // Stop
+        motor_state=Stop;
 
-		is_front=false;
-		front_time=0;
-		is_error=false;
-		WRITE_EN_PIN(1);
+        is_front=false;
+        front_time=0;
+        is_error=false;
+        WRITE_EN_PIN(1);
 
-	}
-	
-	//判断耗材
-	if(digitalRead(ENDSTOP_3))
-	{
-		//无耗材，停止电机
-		driver.VACTUAL(STOP);	//停止
-		motor_state=Stop;
-		
-		//断料引脚输出低电平
-		digitalWrite(DUANLIAO,0);
-		
-		//关闭指示灯
-		digitalWrite(START_LED,0);
+    }
+    
+    // Determine material
+    if(digitalRead(ENDSTOP_3))
+    {
+        // No material, stop motor
+        driver.VACTUAL(STOP);    // Stop
+        motor_state=Stop;
+        
+        // Material break pin outputs low level
+        digitalWrite(DUANLIAO,0);
+        
+        // Turn off indicator light
+        digitalWrite(START_LED,0);
 
-		is_front=false;
-		front_time=0;
-		is_error=false;
-		WRITE_EN_PIN(1);
+        is_front=false;
+        front_time=0;
+        is_error=false;
+        WRITE_EN_PIN(1);
 
-		
-		return;//无耗材，结束
-	}
-		
-	//有耗材，断料引脚输出高电平
-	digitalWrite(DUANLIAO,1);
-	
-	//开启指示灯
-	digitalWrite(START_LED,1);
+        
+        return; // No material, end
+    }
+        
+    // Material present, material break pin outputs high level
+    digitalWrite(DUANLIAO,1);
+    
+    // Turn on indicator light
+    digitalWrite(START_LED,1);
 
-	//判断是否有错误
-	if(is_error){
-		//停止电机
-		driver.VACTUAL(STOP);	//停止
-		motor_state=Stop;
-		WRITE_EN_PIN(1);
-		return ;
-	}
+    // Determine if there is an error
+    if(is_error){
+        // Stop motor
+        driver.VACTUAL(STOP);    // Stop
+        motor_state=Stop;
+        WRITE_EN_PIN(1);
+        return ;
+    }
 
-	//缓冲器位置记录
-	if(buffer.buffer1_pos1_sensor_state)	//缓冲器位置为1，耗材往前推
-	{
-		last_motor_state=motor_state;		//记录上一次状态
-		motor_state=Forward;
-		is_front=true;
+    // Buffer position record
+    if(buffer.buffer1_pos1_sensor_state)    // Buffer position is 1, push material forward
+    {
+        last_motor_state=motor_state;        // Record last state
+        motor_state=Forward;
+        is_front=true;
 
-	}
-	else if(buffer.buffer1_pos2_sensor_state)	//缓冲器位置为2,电机停止转动
-	{
-		last_motor_state=motor_state;		//记录上一次状态
-		motor_state=Stop;
-		is_front=false;
-		front_time=0;
-	}
-	else if(buffer.buffer1_pos3_sensor_state)	//缓冲器位置为3，回退耗材
-	{
-		last_motor_state=motor_state;		//记录上一次状态
-		motor_state=Back;
-		is_front=false;
-		front_time=0;
-	}
-			
-	if(motor_state==last_motor_state)//如果上次状态跟这次状态一致，则不需要再次发送控制命令,结束此次函数
-		return;
-	
-	//电机控制
-	switch(motor_state)
-	{
-		case Forward://向前
-		{
-			WRITE_EN_PIN(0);
-			if(last_motor_state==Back)	driver.VACTUAL(STOP);//上次是后退，先停下再前进
-			driver.shaft(FORWARD);
-			driver.VACTUAL(VACTRUAL_VALUE);
+    }
+    else if(buffer.buffer1_pos2_sensor_state)    // Buffer position is 2, motor stops rotating
+    {
+        last_motor_state=motor_state;        // Record last state
+        motor_state=Stop;
+        is_front=false;
+        front_time=0;
+    }
+    else if(buffer.buffer1_pos3_sensor_state)    // Buffer position is 3, retract material
+    {
+        last_motor_state=motor_state;        // Record last state
+        motor_state=Back;
+        is_front=false;
+        front_time=0;
+    }
+            
+    if(motor_state==last_motor_state) // If last state is the same as this state, no need to send control command again, end this function
+        return;
+    
+    // Motor control
+    switch(motor_state)
+    {
+        case Forward: // Forward
+        {
+            WRITE_EN_PIN(0);
+            if(last_motor_state==Back)    driver.VACTUAL(STOP); // Last was back, stop first then forward
+            driver.shaft(FORWARD);
+            driver.VACTUAL(VACTRUAL_VALUE);
 
-		}break;
-		case Stop://停止
-		{
-			WRITE_EN_PIN(1);
-			driver.VACTUAL(STOP);
+        }break;
+        case Stop: // Stop
+        {
+            WRITE_EN_PIN(1);
+            driver.VACTUAL(STOP);
 
-		}break;
-		case Back://向后
-		{
-			WRITE_EN_PIN(0);
-			if(last_motor_state==Forward)	driver.VACTUAL(STOP);;//上次是前进，先停下再后退
-			driver.shaft(BACK);
-			driver.VACTUAL(VACTRUAL_VALUE);
-		}break;
-		
-	}
-	
-	
+        }break;
+        case Back: // Back
+        {
+            WRITE_EN_PIN(0);
+            if(last_motor_state==Forward)    driver.VACTUAL(STOP); // Last was forward, stop first then back
+            driver.shaft(BACK);
+            driver.VACTUAL(VACTRUAL_VALUE);
+        }break;
+        
+    }
+    
+    
 }
 
 void timer_it_callback(){
-  if(is_front){//如果往前推
+  if(is_front){ // If pushing forward
     front_time++;
-    if(front_time>timeout){//如果超时
+    if(front_time>timeout){ // If timeout
       is_error=true;
     }
   }
 }
 
 void buffer_debug(void){
-	// Serial.print("buffer1_pos1_sensor_state:");Serial.println(buffer.buffer1_pos1_sensor_state);
-	// Serial.print("buffer1_pos2_sensor_state:");Serial.println(buffer.buffer1_pos2_sensor_state);
-	// Serial.print("buffer1_pos3_sensor_state:");Serial.println(buffer.buffer1_pos3_sensor_state);
-	// Serial.print("buffer1_material_swtich_state:");Serial.println(buffer.buffer1_material_swtich_state);
-	// Serial.print("key1:");Serial.println(buffer.key1);
-	// Serial.print("key2:");Serial.println(buffer.key2);
-	static int i=0;
-	if(i<0x1ff){
-		Serial.print("i:");
-		Serial.println(i);
-		driver.GCONF(i);
-		driver.PWMCONF(i);
-		i++;
-	}
-	uint32_t gconf = driver.GCONF();
-	uint32_t chopconf=driver.CHOPCONF();
-	uint32_t pwmconf = driver.PWMCONF();
-	if(driver.CRCerror){
-		Serial.println("CRCerror");
-	}
-	else{
-		Serial.print("GCONF():0x");
-		Serial.println(gconf,HEX);
-		Serial.print("CHOPCONF():0x");
-		char buf[11];  // "0x" + 8 digits + null terminator
-		sprintf(buf, "%08lX", chopconf);  // %08lX -> 8位大写十六进制（long unsigned）
-		Serial.println(buf);
-		Serial.print("PWMCONF():0x");
-		sprintf(buf, "%08lX", pwmconf);  // %08lX -> 8位大写十六进制（long unsigned）
-		Serial.println(buf);
-		Serial.println("");
-	}
-  	delay(1000);
+    // Serial.print("buffer1_pos1_sensor_state:");Serial.println(buffer.buffer1_pos1_sensor_state);
+    // Serial.print("buffer1_pos2_sensor_state:");Serial.println(buffer.buffer1_pos2_sensor_state);
+    // Serial.print("buffer1_pos3_sensor_state:");Serial.println(buffer.buffer1_pos3_sensor_state);
+    // Serial.print("buffer1_material_swtich_state:");Serial.println(buffer.buffer1_material_swtich_state);
+    // Serial.print("key1:");Serial.println(buffer.key1);
+    // Serial.print("key2:");Serial.println(buffer.key2);
+    static int i=0;
+    if(i<0x1ff){
+        Serial.print("i:");
+        Serial.println(i);
+        driver.GCONF(i);
+        driver.PWMCONF(i);
+        i++;
+    }
+    uint32_t gconf = driver.GCONF();
+    uint32_t chopconf=driver.CHOPCONF();
+    uint32_t pwmconf = driver.PWMCONF();
+    if(driver.CRCerror){
+        Serial.println("CRCerror");
+    }
+    else{
+        Serial.print("GCONF():0x");
+        Serial.println(gconf,HEX);
+        Serial.print("CHOPCONF():0x");
+        char buf[11];  // "0x" + 8 digits + null terminator
+        sprintf(buf, "%08lX", chopconf);  // %08lX -> 8-digit uppercase hexadecimal (long unsigned)
+        Serial.println(buf);
+        Serial.print("PWMCONF():0x");
+        sprintf(buf, "%08lX", pwmconf);  // %08lX -> 8-digit uppercase hexadecimal (long unsigned)
+        Serial.println(buf);
+        Serial.println("");
+    }
+      delay(1000);
 }
